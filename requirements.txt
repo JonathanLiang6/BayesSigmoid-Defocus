@@ -1,0 +1,19 @@
+# 核心依赖 - 将安装最新稳定版本
+# 安装命令: pip install -r requirements.txt
+
+# 贝叶斯推断库
+pymc
+
+# 数值计算
+numpy
+scipy
+
+# 数据处理和可视化
+pandas
+matplotlib
+
+# 贝叶斯分析工具
+arviz
+
+# 类型支持
+typing-extensions
