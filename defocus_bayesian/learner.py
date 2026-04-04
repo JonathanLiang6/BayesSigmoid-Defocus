@@ -71,7 +71,7 @@ class SigmoidActiveLearner:
             n_chains=mcmc_chains,
             tune=mcmc_tune,
             draws=mcmc_draws,
-            target_accept=0.85,
+            target_accept=0.9,  # 增加目标接受率以减少divergences
             random_seed=random_seed,
         )
         
@@ -242,6 +242,7 @@ class SigmoidActiveLearner:
         self,
         response_func,
         verbose: bool = True,
+        input_data_path: str = "input_data.csv",
     ) -> LearningResult:
         """
         执行完整的主动学习流程。
@@ -249,11 +250,26 @@ class SigmoidActiveLearner:
         Args:
             response_func: 响应函数，输入剂量返回反应
             verbose: 是否打印详细输出
+            input_data_path: 输入数据文件路径
             
         Returns:
             学习结果
         """
+        import os
+        from tqdm import tqdm
+        
         self.reset()
+        
+        # 检查是否存在输入数据文件
+        if os.path.exists(input_data_path):
+            # 模式 A：数据驱动
+            if verbose:
+                print("[状态] 检测到输入数据文件，使用数据驱动模式...")
+            self.load_from_csv(input_data_path)
+        else:
+            # 模式 B：冷启动
+            if verbose:
+                print("[状态] 未检测到输入数据文件，使用冷启动模式...")
         
         if verbose:
             print(f"\n开始主动学习流程...")
@@ -261,35 +277,37 @@ class SigmoidActiveLearner:
             print(f"不确定性阈值: {self.uncertainty_threshold} μm")
             print("-" * 50)
         
+        # 主动学习循环
         while True:
             # 推荐下一剂量
             next_dose, strategy = self.recommend_next_dose()
             
             if verbose:
-                print(f"\n第 {self.round_num + 1} 轮")
-                print(f"推荐剂量: {next_dose:.2f} D ({strategy})")
+                print(f"\n[状态] 第 {self.round_num + 1} 轮")
+                print(f"[结果] 推荐下一轮离焦剂量: {next_dose:.2f} D ({strategy})")
             
             # 获取观测反应
             response = response_func(next_dose)
             self.add_measurement(next_dose, response)
             
             if verbose:
-                print(f"观测反应: {response:.1f} μm")
+                print(f"[结果] 观测反应: {response:.1f} μm")
             
             # 检查停止条件
             should_stop, stop_reason = self.should_stop()
             if should_stop:
                 if verbose:
-                    print(f"\n停止: {stop_reason}")
+                    print(f"\n[状态] 停止: {stop_reason}")
+                logger.info(f"系统停止: {stop_reason}")
                 break
         
         result = self.get_result()
         
         if verbose:
             print("-" * 50)
-            print(f"估计阈值: {result.threshold_estimate:.2f} ± {result.threshold_std:.2f} D")
-            print(f"最佳剂量: {result.best_dose:.2f} D")
-            print(f"总测量次数: {result.n_measurements}")
+            print(f"[结果] 估计阈值: {result.threshold_estimate:.2f} ± {result.threshold_std:.2f} D")
+            print(f"[结果] 最佳剂量: {result.best_dose:.2f} D")
+            print(f"[结果] 总测量次数: {result.n_measurements}")
         
         return result
         

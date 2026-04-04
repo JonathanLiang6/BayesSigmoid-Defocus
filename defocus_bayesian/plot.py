@@ -1,5 +1,5 @@
 """
-可视化模块 - 绘制剂量-反应曲线和采集函数
+Visualization Module - Plot dose-response curves and acquisition functions
 """
 
 from typing import Optional, Tuple, List
@@ -20,54 +20,54 @@ def plot_dose_response_curve(
     dose_range: Tuple[float, float] = (0.5, 6.0),
     n_points: int = 100,
     figsize: Tuple[float, float] = (10, 6),
-    title: str = "剂量-反应曲线",
+    title: str = "Dose-Response Curve",
 ) -> Figure:
     """
-    绘制后验剂量-反应曲线。
+    Plot posterior dose-response curve.
     
     Args:
-        model: 已拟合的 Sigmoid 模型
-        simulator: 模拟器（用于绘制真实曲线，可选）
-        measurements: 测量点列表 [(dose, response), ...]
-        dose_range: 剂量范围
-        n_points: 曲线点数
-        figsize: 图像大小
-        title: 图表标题
+        model: Fitted Sigmoid model
+        simulator: Simulator (for plotting true curve, optional)
+        measurements: List of measurement points [(dose, response), ...]
+        dose_range: Dose range
+        n_points: Number of points for curve
+        figsize: Figure size
+        title: Chart title
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # 生成剂量网格
+    # Generate dose grid
     doses = np.linspace(dose_range[0], dose_range[1], n_points)
     
-    # 预测
+    # Predict
     pred = model.predict(doses)
     mean = pred["mean"]
     lower = pred["lower"]
     upper = pred["upper"]
     
-    # 绘制后验均值
-    ax.plot(doses, mean, 'b-', linewidth=2, label='后验均值')
+    # Plot posterior mean
+    ax.plot(doses, mean, 'b-', linewidth=2, label='Posterior Mean')
     
-    # 绘制置信区间
-    ax.fill_between(doses, lower, upper, alpha=0.3, color='blue', label='95% 置信区间')
+    # Plot confidence interval
+    ax.fill_between(doses, lower, upper, alpha=0.3, color='blue', label='95% CI')
     
-    # 绘制真实曲线（如果提供）
+    # Plot true curve (if provided)
     if simulator is not None:
         true_doses, true_responses = simulator.get_true_curve(dose_range, n_points)
-        ax.plot(true_doses, true_responses, 'g--', linewidth=2, label='真实曲线')
+        ax.plot(true_doses, true_responses, 'g--', linewidth=2, label='True Curve')
     
-    # 绘制测量点
+    # Plot measurement points
     if measurements is not None and len(measurements) > 0:
         doses_obs = [m[0] for m in measurements]
         responses_obs = [m[1] for m in measurements]
-        ax.scatter(doses_obs, responses_obs, c='red', s=100, zorder=5, label='观测数据')
+        ax.scatter(doses_obs, responses_obs, c='red', s=100, zorder=5, label='Observed Data')
     
-    # 设置标签和标题
-    ax.set_xlabel('剂量 (D)', fontsize=12)
-    ax.set_ylabel('反应 (μm)', fontsize=12)
+    # Set labels and title
+    ax.set_xlabel('Dose (D)', fontsize=12)
+    ax.set_ylabel('Response (μm)', fontsize=12)
     ax.set_title(title, fontsize=14)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
@@ -83,48 +83,48 @@ def plot_acquisition_function(
     y_best: Optional[float] = None,
     measurements: Optional[List[Tuple[float, float]]] = None,
     figsize: Tuple[float, float] = (10, 4),
-    title: str = "采集函数",
+    title: str = "Acquisition Function",
 ) -> Figure:
     """
-    绘制采集函数。
+    Plot acquisition function.
     
     Args:
-        model: 已拟合的 Sigmoid 模型
-        acquisition: 采集函数对象
-        strategy: 策略 ("variance" 或 "ei")
-        y_best: 当前最佳反应值（EI需要）
-        measurements: 测量点列表
-        figsize: 图像大小
-        title: 图表标题
+        model: Fitted Sigmoid model
+        acquisition: Acquisition function object
+        strategy: Strategy ("variance" or "ei")
+        y_best: Current best response value (needed for EI)
+        measurements: List of measurement points
+        figsize: Figure size
+        title: Chart title
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # 获取采集函数值
+    # Get acquisition function values
     x_grid, acq_values = acquisition.get_acquisition_values(model, strategy, y_best)
     
-    # 绘制采集函数
+    # Plot acquisition function
     ax.plot(x_grid, acq_values, 'purple', linewidth=2)
     ax.fill_between(x_grid, 0, acq_values, alpha=0.3, color='purple')
     
-    # 标记最大值
+    # Mark maximum
     max_idx = np.argmax(acq_values)
     max_dose = x_grid[max_idx]
     max_value = acq_values[max_idx]
-    ax.plot(max_dose, max_value, 'r*', markersize=15, label=f'推荐剂量: {max_dose:.2f} D')
+    ax.plot(max_dose, max_value, 'r*', markersize=15, label=f'Recommended: {max_dose:.2f} D')
     
-    # 标记已测量点
+    # Mark measured points
     if measurements is not None and len(measurements) > 0:
         doses_obs = [m[0] for m in measurements]
         ax.scatter(doses_obs, [0] * len(doses_obs), c='red', s=100, marker='|', 
-                   zorder=5, label='已测量剂量')
+                   zorder=5, label='Measured')
     
-    # 设置标签和标题
-    strategy_name = "后验方差" if strategy == "variance" else "期望改进"
-    ax.set_xlabel('剂量 (D)', fontsize=12)
-    ax.set_ylabel('采集函数值', fontsize=12)
+    # Set labels and title
+    strategy_name = "Posterior Variance" if strategy == "variance" else "Expected Improvement"
+    ax.set_xlabel('Dose (D)', fontsize=12)
+    ax.set_ylabel('Acquisition Value', fontsize=12)
     ax.set_title(f"{title} ({strategy_name})", fontsize=14)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
@@ -144,47 +144,47 @@ def plot_learning_process(
     figsize: Tuple[float, float] = (14, 5),
 ) -> Figure:
     """
-    绘制学习过程的组合图（剂量-反应曲线 + 采集函数）。
+    Plot combined learning process (dose-response curve + acquisition function).
     
     Args:
-        model: 已拟合的 Sigmoid 模型
-        acquisition: 采集函数对象
-        simulator: 模拟器（可选）
-        measurements: 测量点列表
-        strategy: 采集策略
-        y_best: 当前最佳反应值
-        dose_range: 剂量范围
-        figsize: 图像大小
+        model: Fitted Sigmoid model
+        acquisition: Acquisition function object
+        simulator: Simulator (optional)
+        measurements: List of measurement points
+        strategy: Acquisition strategy
+        y_best: Current best response value
+        dose_range: Dose range
+        figsize: Figure size
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
-    # 左图：剂量-反应曲线
+    # Left plot: Dose-response curve
     ax1 = axes[0]
     doses = np.linspace(dose_range[0], dose_range[1], 100)
     pred = model.predict(doses)
     
-    ax1.plot(doses, pred["mean"], 'b-', linewidth=2, label='后验均值')
+    ax1.plot(doses, pred["mean"], 'b-', linewidth=2, label='Posterior Mean')
     ax1.fill_between(doses, pred["lower"], pred["upper"], alpha=0.3, color='blue', label='95% CI')
     
     if simulator is not None:
         true_doses, true_responses = simulator.get_true_curve(dose_range, 100)
-        ax1.plot(true_doses, true_responses, 'g--', linewidth=2, label='真实曲线')
+        ax1.plot(true_doses, true_responses, 'g--', linewidth=2, label='True Curve')
     
     if measurements is not None and len(measurements) > 0:
         doses_obs = [m[0] for m in measurements]
         responses_obs = [m[1] for m in measurements]
-        ax1.scatter(doses_obs, responses_obs, c='red', s=100, zorder=5, label='观测数据')
+        ax1.scatter(doses_obs, responses_obs, c='red', s=100, zorder=5, label='Observed Data')
     
-    ax1.set_xlabel('剂量 (D)', fontsize=12)
-    ax1.set_ylabel('反应 (μm)', fontsize=12)
-    ax1.set_title('剂量-反应曲线', fontsize=14)
+    ax1.set_xlabel('Dose (D)', fontsize=12)
+    ax1.set_ylabel('Response (μm)', fontsize=12)
+    ax1.set_title('Dose-Response Curve', fontsize=14)
     ax1.legend(loc='best')
     ax1.grid(True, alpha=0.3)
     
-    # 右图：采集函数
+    # Right plot: Acquisition function
     ax2 = axes[1]
     x_grid, acq_values = acquisition.get_acquisition_values(model, strategy, y_best)
     
@@ -194,17 +194,17 @@ def plot_learning_process(
     max_idx = np.argmax(acq_values)
     max_dose = x_grid[max_idx]
     max_value = acq_values[max_idx]
-    ax2.plot(max_dose, max_value, 'r*', markersize=15, label=f'推荐: {max_dose:.2f} D')
+    ax2.plot(max_dose, max_value, 'r*', markersize=15, label=f'Recommended: {max_dose:.2f} D')
     
     if measurements is not None and len(measurements) > 0:
         doses_obs = [m[0] for m in measurements]
         ax2.scatter(doses_obs, [0] * len(doses_obs), c='red', s=100, marker='|', 
-                   zorder=5, label='已测量')
+                   zorder=5, label='Measured')
     
-    strategy_name = "后验方差" if strategy == "variance" else "期望改进"
-    ax2.set_xlabel('剂量 (D)', fontsize=12)
-    ax2.set_ylabel('采集函数值', fontsize=12)
-    ax2.set_title(f'采集函数 ({strategy_name})', fontsize=14)
+    strategy_name = "Posterior Variance" if strategy == "variance" else "Expected Improvement"
+    ax2.set_xlabel('Dose (D)', fontsize=12)
+    ax2.set_ylabel('Acquisition Value', fontsize=12)
+    ax2.set_title(f'Acquisition Function ({strategy_name})', fontsize=14)
     ax2.legend(loc='best')
     ax2.grid(True, alpha=0.3)
     
@@ -219,45 +219,45 @@ def plot_posterior_distribution(
     title: Optional[str] = None,
 ) -> Figure:
     """
-    绘制参数的后验分布。
+    Plot posterior distribution of a parameter.
     
     Args:
-        model: 已拟合的 Sigmoid 模型
-        param_name: 参数名称
-        figsize: 图像大小
-        title: 图表标题
+        model: Fitted Sigmoid model
+        param_name: Parameter name
+        figsize: Figure size
+        title: Chart title
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # 获取后验样本
+    # Get posterior samples
     posterior = model.trace.posterior[param_name].values.reshape(-1)
     
-    # 绘制直方图
+    # Plot histogram
     ax.hist(posterior, bins=50, density=True, alpha=0.7, color='steelblue', edgecolor='black')
     
-    # 绘制均值线
+    # Plot mean line
     mean_val = np.mean(posterior)
-    ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'均值: {mean_val:.3f}')
+    ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.3f}')
     
-    # 绘制中位数线
+    # Plot median line
     median_val = np.median(posterior)
-    ax.axvline(median_val, color='green', linestyle=':', linewidth=2, label=f'中位数: {median_val:.3f}')
+    ax.axvline(median_val, color='green', linestyle=':', linewidth=2, label=f'Median: {median_val:.3f}')
     
-    # 设置标签
+    # Set labels
     param_labels = {
-        "baseline": "基线 (baseline)",
-        "max_response": "最大反应 (max_response)",
-        "slope": "斜率 (slope)",
-        "threshold": "阈值 (threshold)",
-        "sigma": "噪声标准差 (sigma)",
+        "baseline": "Baseline",
+        "max_response": "Max Response",
+        "slope": "Slope",
+        "threshold": "Threshold (ED50)",
+        "sigma": "Noise Std (sigma)",
     }
     
     ax.set_xlabel(param_labels.get(param_name, param_name), fontsize=12)
-    ax.set_ylabel('密度', fontsize=12)
-    ax.set_title(title or f"{param_labels.get(param_name, param_name)} 的后验分布", fontsize=14)
+    ax.set_ylabel('Density', fontsize=12)
+    ax.set_title(title or f"Posterior Distribution of {param_labels.get(param_name, param_name)}", fontsize=14)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, axis='y')
     
@@ -270,22 +270,22 @@ def plot_all_posteriors(
     figsize: Tuple[float, float] = (15, 10),
 ) -> Figure:
     """
-    绘制所有参数的后验分布。
+    Plot posterior distributions of all parameters.
     
     Args:
-        model: 已拟合的 Sigmoid 模型
-        figsize: 图像大小
+        model: Fitted Sigmoid model
+        figsize: Figure size
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     param_names = ["baseline", "max_response", "slope", "threshold", "sigma"]
     param_labels = {
-        "baseline": "基线 (baseline)",
-        "max_response": "最大反应 (max_response)",
-        "slope": "斜率 (slope)",
-        "threshold": "阈值 (threshold)",
-        "sigma": "噪声标准差 (sigma)",
+        "baseline": "Baseline",
+        "max_response": "Max Response",
+        "slope": "Slope",
+        "threshold": "Threshold (ED50)",
+        "sigma": "Noise Std (sigma)",
     }
     
     fig, axes = plt.subplots(2, 3, figsize=figsize)
@@ -298,17 +298,17 @@ def plot_all_posteriors(
         ax.hist(posterior, bins=50, density=True, alpha=0.7, color='steelblue', edgecolor='black')
         
         mean_val = np.mean(posterior)
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'均值: {mean_val:.3f}')
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.3f}')
         
         ax.set_xlabel(param_labels[param], fontsize=11)
-        ax.set_ylabel('密度', fontsize=11)
+        ax.set_ylabel('Density', fontsize=11)
         ax.legend(loc='best', fontsize=9)
         ax.grid(True, alpha=0.3, axis='y')
     
-    # 隐藏多余的子图
+    # Hide extra subplot
     axes[-1].axis('off')
     
-    plt.suptitle('参数后验分布', fontsize=16, y=1.02)
+    plt.suptitle('Parameter Posterior Distributions', fontsize=16, y=1.02)
     plt.tight_layout()
     return fig
 
@@ -318,75 +318,75 @@ def plot_simulation_results(
     figsize: Tuple[float, float] = (14, 10),
 ) -> Figure:
     """
-    绘制模拟研究结果。
+    Plot simulation study results.
     
     Args:
-        results: 模拟结果列表
-        figsize: 图像大小
+        results: List of simulation results
+        figsize: Figure size
         
     Returns:
-        Matplotlib Figure 对象
+        Matplotlib Figure object
     """
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     
-    # 提取数据
+    # Extract data
     n_measurements = [r["n_measurements"] for r in results]
     errors = [r["threshold_error"] for r in results]
     true_thresholds = [r["true_threshold"] for r in results]
     estimated_thresholds = [r["estimated_threshold"] for r in results]
     
-    # 图1：测量次数分布
+    # Plot 1: Distribution of number of measurements
     ax1 = axes[0, 0]
     ax1.hist(n_measurements, bins=range(2, max(n_measurements)+2), alpha=0.7, color='steelblue', edgecolor='black')
-    ax1.set_xlabel('测量次数', fontsize=12)
-    ax1.set_ylabel('频数', fontsize=12)
-    ax1.set_title('测量次数分布', fontsize=14)
+    ax1.set_xlabel('Number of Measurements', fontsize=12)
+    ax1.set_ylabel('Frequency', fontsize=12)
+    ax1.set_title('Distribution of Measurement Count', fontsize=14)
     ax1.grid(True, alpha=0.3, axis='y')
     
-    # 图2：阈值估计误差分布
+    # Plot 2: Distribution of threshold estimation error
     ax2 = axes[0, 1]
     ax2.hist(errors, bins=30, alpha=0.7, color='coral', edgecolor='black')
-    ax2.set_xlabel('阈值估计误差 (D)', fontsize=12)
-    ax2.set_ylabel('频数', fontsize=12)
-    ax2.set_title('阈值估计误差分布', fontsize=14)
+    ax2.set_xlabel('Threshold Estimation Error (D)', fontsize=12)
+    ax2.set_ylabel('Frequency', fontsize=12)
+    ax2.set_title('Distribution of Estimation Error', fontsize=14)
     ax2.grid(True, alpha=0.3, axis='y')
     
-    # 图3：真实 vs 估计阈值
+    # Plot 3: True vs Estimated threshold
     ax3 = axes[1, 0]
     ax3.scatter(true_thresholds, estimated_thresholds, alpha=0.6, c='green')
     
-    # 添加对角线
+    # Add diagonal line
     min_val = min(min(true_thresholds), min(estimated_thresholds))
     max_val = max(max(true_thresholds), max(estimated_thresholds))
-    ax3.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='理想线')
+    ax3.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Ideal')
     
-    ax3.set_xlabel('真实阈值 (D)', fontsize=12)
-    ax3.set_ylabel('估计阈值 (D)', fontsize=12)
-    ax3.set_title('真实 vs 估计阈值', fontsize=14)
+    ax3.set_xlabel('True Threshold (D)', fontsize=12)
+    ax3.set_ylabel('Estimated Threshold (D)', fontsize=12)
+    ax3.set_title('True vs Estimated Threshold', fontsize=14)
     ax3.legend(loc='best')
     ax3.grid(True, alpha=0.3)
     
-    # 图4：测量次数 vs 误差
+    # Plot 4: Number of measurements vs Error
     ax4 = axes[1, 1]
     ax4.scatter(n_measurements, errors, alpha=0.6, c='purple')
-    ax4.set_xlabel('测量次数', fontsize=12)
-    ax4.set_ylabel('阈值估计误差 (D)', fontsize=12)
-    ax4.set_title('测量次数 vs 估计误差', fontsize=14)
+    ax4.set_xlabel('Number of Measurements', fontsize=12)
+    ax4.set_ylabel('Threshold Estimation Error (D)', fontsize=12)
+    ax4.set_title('Measurements vs Estimation Error', fontsize=14)
     ax4.grid(True, alpha=0.3)
     
-    plt.suptitle('模拟研究结果', fontsize=16, y=1.02)
+    plt.suptitle('Simulation Study Results', fontsize=16, y=1.02)
     plt.tight_layout()
     return fig
 
 
 def save_figure(fig: Figure, filepath: str, dpi: int = 150) -> None:
     """
-    保存图像到文件。
+    Save figure to file.
     
     Args:
-        fig: Matplotlib Figure 对象
-        filepath: 保存路径
-        dpi: 分辨率
+        fig: Matplotlib Figure object
+        filepath: Save path
+        dpi: Resolution
     """
     fig.savefig(filepath, dpi=dpi, bbox_inches='tight')
-    print(f"图像已保存到: {filepath}")
+    print(f"Figure saved to: {filepath}")

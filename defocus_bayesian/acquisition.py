@@ -126,10 +126,12 @@ class AcquisitionFunction:
             strategy = "后验方差"
             
         elif round_num >= 4:
-            # 第4轮起：使用期望改进
+            # 第4轮起：使用期望改进，根据轮次调整探索参数
             if y_best is None:
                 raise ValueError("第4轮起需要提供 y_best 参数")
-            x_grid, acq_values = self.expected_improvement(model, y_best)
+            # 轮次越晚，探索参数越小，越倾向于开发
+            xi = 0.01 if round_num > 4 else 0.05
+            x_grid, acq_values = self.expected_improvement(model, y_best, xi=xi)
             strategy = "期望改进"
             
         else:
@@ -144,8 +146,13 @@ class AcquisitionFunction:
         # 找到采集函数最大的点
         best_idx = np.argmax(acq_values)
         recommended_dose = float(x_grid[best_idx])
+        max_acq_value = float(acq_values[best_idx])
         
-        logger.debug(f"推荐剂量: {recommended_dose:.2f} D, 策略: {strategy}")
+        # 记录采集函数的原始评分数据
+        logger.info(f"采集函数策略: {strategy}")
+        logger.info(f"最大采集函数值: {max_acq_value:.4f}")
+        logger.info(f"推荐剂量: {recommended_dose:.2f} D")
+        logger.debug(f"采集函数完整数据: x_grid={x_grid}, acq_values={acq_values}")
         
         return recommended_dose, strategy
     

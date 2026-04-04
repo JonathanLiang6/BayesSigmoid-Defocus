@@ -23,9 +23,9 @@ class SigmoidModel:
     def __init__(
         self,
         n_chains: int = 4,
-        tune: int = 2000,
-        draws: int = 1000,
-        target_accept: float = 0.85,
+        tune: int = 3000,
+        draws: int = 2000,
+        target_accept: float = 0.9,
         random_seed: Optional[int] = None,
     ):
         """
@@ -131,19 +131,65 @@ class SigmoidModel:
         # 构建模型
         self.build_model(x_obs, y_obs)
         
-        # 执行采样
+        # 执行采样，重定向所有输出到日志
         with self.model:
-            self.trace = pm.sample(
-                draws=self.draws,
-                tune=self.tune,
-                chains=self.n_chains,
-                target_accept=self.target_accept,
-                random_seed=self.random_seed,
-                progressbar=False,
-            )
+            # 临时禁用PyMC和ArviZ的日志输出
+            import warnings
+            from contextlib import redirect_stderr, redirect_stdout
+            import io
+            import sys
+            
+            # 捕获标准输出和错误
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            
+            try:
+                # 捕获所有输出
+                with redirect_stdout(stdout_capture):
+                    with redirect_stderr(stderr_capture):
+                        # 调整采样参数以减少divergences
+                        self.trace = pm.sample(
+                            draws=self.draws,
+                            tune=self.tune,
+                            chains=self.n_chains,
+                            target_accept=0.9,  # 增加目标接受率
+                            random_seed=self.random_seed,
+                            progressbar=False,
+                            return_inferencedata=True,
+                        )
+                
+                # 将捕获的输出写入日志
+                captured_stdout = stdout_capture.getvalue()
+                if captured_stdout:
+                    for line in captured_stdout.strip().split('\n'):
+                        if line.strip():
+                            logger.info(f"PyMC 信息: {line.strip()}")
+                
+                captured_stderr = stderr_capture.getvalue()
+                if captured_stderr:
+                    for line in captured_stderr.strip().split('\n'):
+                        if line.strip():
+                            if "ERROR" in line:
+                                logger.error(f"PyMC 错误: {line.strip()}")
+                            elif "WARNING" in line:
+                                logger.warning(f"PyMC 警告: {line.strip()}")
+                            else:
+                                logger.info(f"PyMC 信息: {line.strip()}")
+            except Exception as e:
+                logger.error(f"MCMC 采样失败: {e}")
+                raise
         
         self.is_fitted = True
         logger.info("MCMC 采样完成")
+        
+        # 记录收敛诊断指标
+        convergence = self.check_convergence()
+        logger.info("MCMC 收敛诊断:")
+        logger.info(f"R-hat 值: {convergence['rhat']}")
+        logger.info(f"ESS 值: {convergence['ess']}")
+        if convergence['warnings']:
+            for warning in convergence['warnings']:
+                logger.warning(f"收敛警告: {warning}")
         
         return self.trace
     

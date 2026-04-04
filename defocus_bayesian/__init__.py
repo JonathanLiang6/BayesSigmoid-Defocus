@@ -9,6 +9,7 @@ from .model import SigmoidModel
 from .acquisition import AcquisitionFunction
 from .learner import SigmoidActiveLearner
 from .simulate import SubjectSimulator
+from .plot_bilingual import plot_all_figures
 
 __version__ = "1.0.0"
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "AcquisitionFunction",
     "SigmoidActiveLearner",
     "SubjectSimulator",
+    "plot_all_figures",
 ]

@@ -12,6 +12,8 @@
 
 import argparse
 import os
+import logging
+from datetime import datetime
 from typing import Dict, Callable
 
 from defocus_bayesian import SigmoidActiveLearner
@@ -43,6 +45,25 @@ def create_exploration_learner() -> SigmoidActiveLearner:
     )
 
 
+def setup_logging(output_dir: str):
+    """设置日志记录"""
+    log_file = os.path.join(output_dir, "run.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+        ]
+    )
+    
+    # 屏蔽arviz的INFO级别输出
+    logging.getLogger('arviz').setLevel(logging.WARNING)
+    logging.getLogger('arviz.preview').setLevel(logging.WARNING)
+    
+    return log_file
+
+
 def run_simulation(
     n_subjects: int = 100,
     output_dir: str = "results",
@@ -62,12 +83,26 @@ def run_simulation(
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
     
-    print("=" * 70)
+    # 创建可视化子目录
+    visualization_dir = os.path.join(output_dir, "visualization")
+    os.makedirs(visualization_dir, exist_ok=True)
+    
+    # 设置日志
+    log_file = setup_logging(output_dir)
+    logger = logging.getLogger(__name__)
+    
+    print("=" * 60)
     print("批量模拟测试")
-    print("=" * 70)
+    print("=" * 60)
     print(f"受试者数量: {n_subjects}")
-    print(f"输出目录: {output_dir}")
-    print()
+    print(f"输出目录: {output_dir}\n")
+    
+    # 记录到日志
+    logger.info("=" * 60)
+    logger.info("批量模拟测试")
+    logger.info("=" * 60)
+    logger.info(f"受试者数量: {n_subjects}")
+    logger.info(f"输出目录: {output_dir}")
     
     # 创建模拟研究
     study = SimulationStudy(
@@ -83,22 +118,78 @@ def run_simulation(
             "探索策略 (unc=1.5, max=6)": create_exploration_learner,
         }
         
-        all_stats = study.compare_strategies(strategies, verbose=True)
-        
-        # 保存结果
+        all_stats = study.compare_strategies(strategies, verbose=False)
         results = study.results
+        
+        # 记录详细结果到日志
+        for i, r in enumerate(study.results):
+            logger.info(f"受试者 {i+1}/{n_subjects}: "
+                       f"真实阈值={r['true_threshold']:.2f}D, "
+                       f"估计={r['estimated_threshold']:.2f}±{r['threshold_std']:.2f}D, "
+                       f"误差={r['threshold_error']:.2f}D, "
+                       f"测量次数={r['n_measurements']}")
         
     else:
-        # 运行默认策略
-        stats = study.run(create_default_learner, verbose=True)
-        results = study.results
+        # 运行默认策略 - 简化终端输出
+        print("开始模拟...")
+        
+        study.results = []
+        
+        for i in range(n_subjects):
+            from defocus_bayesian.simulate import SubjectSimulator
+            
+            # 创建新的模拟器和学习器
+            simulator = SubjectSimulator(random_seed=42 + i)
+            simulator.generate_subject()
+            
+            learner = create_default_learner()
+            
+            # 运行主动学习（不输出详细信息）
+            result = learner.learn(
+                simulator.get_response_function(),
+                verbose=False,
+            )
+            
+            # 计算误差
+            threshold_error = abs(result.threshold_estimate - simulator.true_params.threshold)
+            
+            # 记录结果
+            study.results.append({
+                "subject_id": i,
+                "true_threshold": simulator.true_params.threshold,
+                "estimated_threshold": result.threshold_estimate,
+                "threshold_std": result.threshold_std,
+                "threshold_error": threshold_error,
+                "n_measurements": result.n_measurements,
+                "best_dose": result.best_dose,
+                "converged": result.converged,
+                "measurements": result.measurements,
+                "true_params": simulator.true_params,
+            })
+            
+            # 记录到日志
+            logger.info(f"受试者 {i+1}/{n_subjects}: "
+                       f"真实阈值={simulator.true_params.threshold:.2f}D, "
+                       f"估计={result.threshold_estimate:.2f}±{result.threshold_std:.2f}D, "
+                       f"误差={threshold_error:.2f}D, "
+                       f"测量次数={result.n_measurements}")
+            
+            # 简单的进度显示
+            if (i + 1) % 10 == 0 or (i + 1) == n_subjects:
+                print(f"  已完成: {i + 1}/{n_subjects}")
+        
+        # 计算统计量
+        stats = study._compute_statistics()
         all_stats = {"默认策略": stats}
+    
+    results = study.results
     
     # 绘制结果图
     if results:
-        print("\n生成可视化图表...")
+        print("\n正在生成图表...")
         fig = plot_simulation_results(results)
-        save_figure(fig, os.path.join(output_dir, "simulation_results.png"))
+        fig_path = os.path.join(output_dir, "visualization", "simulation_results.png")
+        save_figure(fig, fig_path)
     
     # 保存详细结果到 CSV
     import pandas as pd
@@ -118,14 +209,13 @@ def run_simulation(
     ])
     
     csv_path = os.path.join(output_dir, "simulation_results.csv")
-    results_df.to_csv(csv_path, index=False)
-    print(f"\n详细结果已保存到: {csv_path}")
+    results_df.to_csv(csv_path, index=False, encoding='utf-8')
     
     # 保存统计摘要
     summary_lines = []
-    summary_lines.append("=" * 70)
+    summary_lines.append("=" * 60)
     summary_lines.append("模拟测试统计摘要")
-    summary_lines.append("=" * 70)
+    summary_lines.append("=" * 60)
     
     for name, stats in all_stats.items():
         summary_lines.append(f"\n{name}:")
@@ -138,12 +228,22 @@ def run_simulation(
         summary_lines.append(f"  收敛率 (MCMC): {stats['convergence_rate']:.1f}%")
     
     summary_text = "\n".join(summary_lines)
+    
+    # 打印统计结果到终端
     print("\n" + summary_text)
+    
+    # 记录到日志
+    logger.info("\n" + summary_text)
     
     summary_path = os.path.join(output_dir, "summary.txt")
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write(summary_text)
-    print(f"\n统计摘要已保存到: {summary_path}")
+    
+    print(f"\n结果已保存到 {output_dir}/ 目录:")
+    print(f"  - {os.path.basename(log_file)}")
+    print(f"  - simulation_results.csv")
+    print(f"  - visualization/simulation_results.png")
+    print(f"  - summary.txt")
     
     return all_stats
 
@@ -190,9 +290,9 @@ def main():
         compare_strategies=args.compare,
     )
     
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 60)
     print("测试完成!")
-    print("=" * 70)
+    print("=" * 60)
 
 
 if __name__ == "__main__":

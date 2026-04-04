@@ -74,6 +74,10 @@ pip install numpy scipy matplotlib arviz pandas
 #### 5. 验证安装
 
 ```bash
+# 运行环境检查脚本
+python test/check_environment.py
+
+# 或手动验证
 python -c "import pymc; print(f'PyMC version: {pymc.__version__}')"
 python -c "import numpy; print(f'NumPy version: {numpy.__version__}')"
 ```
@@ -153,16 +157,16 @@ python demo.py
 
 ```bash
 # 默认运行 100 个受试者
-python test_simulation.py
+python test/test_simulation.py
 
 # 指定受试者数量
-python test_simulation.py --n_subjects 50
+python test/test_simulation.py --n_subjects 50
 
 # 对比不同策略
-python test_simulation.py --compare
+python test/test_simulation.py --compare
 
 # 指定输出目录
-python test_simulation.py --output_dir my_results
+python test/test_simulation.py --output_dir my_results
 ```
 
 ## 项目结构
@@ -174,10 +178,19 @@ defocus_bayesian/
 ├── acquisition.py       # 采集函数（后验方差、期望改进）
 ├── learner.py           # SigmoidActiveLearner 主类
 ├── simulate.py          # 模拟数据生成器
-└── plot.py              # 可视化模块
+├── plot.py              # 可视化模块
+└── plot_bilingual.py    # 双语可视化模块
 
 demo.py                  # 演示脚本
-test_simulation.py       # 批量模拟测试脚本
+test/                    # 测试脚本目录
+├── check_environment.py # 环境检查脚本
+├── test_enhanced.py     # 增强版测试脚本
+└── test_simulation.py   # 批量模拟测试脚本
+
+results/                 # 输出结果目录
+├── visualization/       # 可视化图表目录
+└── run.log              # 运行日志
+
 requirements.txt         # 依赖列表
 README.md                # 本文件
 ```
@@ -245,6 +258,8 @@ next_dose, strategy = learner.recommend_next_dose()
 
 ### 可视化
 
+#### 标准可视化
+
 ```python
 from defocus_bayesian.plot import (
     plot_dose_response_curve,
@@ -273,6 +288,36 @@ save_figure(fig, "acquisition.png")
 # 绘制参数后验分布
 fig = plot_all_posteriors(learner.model)
 save_figure(fig, "posteriors.png")
+```
+
+#### 双语可视化
+
+```python
+from defocus_bayesian import plot_all_figures
+
+# 准备轮次数据
+rounds_data = [
+    {
+        'round': i+1,
+        'ed50': result.threshold_estimate,
+        'sigma': 2.0,
+        'best_dose': result.best_dose,
+        'uncertainty': learner.model.get_uncertainty_at_dose(result.best_dose)
+    }
+    for i in range(len(learner.doses))
+]
+
+# 绘制所有双语图表
+figures = plot_all_figures(
+    model=learner.model,
+    doses=learner.doses,
+    responses=learner.responses,
+    acquisition=learner.acquisition,
+    round_num=len(learner.doses),
+    rounds_data=rounds_data,
+    y_best=max(learner.responses) if learner.responses else None,
+    save_dir="figures"
+)
 ```
 
 ## 模型与算法
@@ -426,7 +471,7 @@ MCMC 收敛: 是
 - numpy>=1.24
 - scipy>=1.10
 - matplotlib>=3.5
-- arviz>=0.17
+- arviz[all]>=0.17
 - pandas>=2.0
 - typing-extensions>=4.0
 

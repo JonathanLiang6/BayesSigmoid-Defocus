@@ -2,7 +2,7 @@
 # 安装命令: pip install -r requirements.txt
 
 # 贝叶斯推断库
-pymc
+pymc>=5.10
 
 # 数值计算
 numpy
@@ -14,6 +14,9 @@ matplotlib
 
 # 贝叶斯分析工具
 arviz
+
+# 进度显示
+tqdm
 
 # 类型支持
 typing-extensions
