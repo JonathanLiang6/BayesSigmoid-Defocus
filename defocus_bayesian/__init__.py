@@ -7,15 +7,21 @@
 
 from .model import SigmoidModel
 from .acquisition import AcquisitionFunction
-from .learner import SigmoidActiveLearner
-from .simulate import SubjectSimulator
-from .plot_bilingual import plot_all_figures
+from .learner import SigmoidActiveLearner, LearningResult
+from .simulate import SubjectSimulator, SubjectParameters
+from .plot import ProjectExhibitionSuite, plot_all_figures
+from .config import config, Config
 
 __version__ = "1.0.0"
 __all__ = [
     "SigmoidModel",
     "AcquisitionFunction",
     "SigmoidActiveLearner",
+    "LearningResult",
     "SubjectSimulator",
+    "SubjectParameters",
+    "ProjectExhibitionSuite",
+    "config",
+    "Config",
     "plot_all_figures",
 ]
