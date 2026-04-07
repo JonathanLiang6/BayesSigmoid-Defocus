@@ -13,6 +13,7 @@ from .model import SigmoidModel
 from .acquisition import AcquisitionFunction
 from .plot import ProjectExhibitionSuite
 from .config import config
+from .feature_processor import FeatureProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +91,21 @@ class SigmoidActiveLearner:
         self.responses: List[float] = []
         self.round_num: int = 0
         
+        # 存储特征数据
+        self.features: Optional[np.ndarray] = None
+        self.feature_columns: List[str] = []
+        
+        # 特征处理器
+        self.feature_processor = FeatureProcessor()
+        
     def reset(self) -> None:
         """重置学习器状态"""
         self.doses = []
         self.responses = []
         self.round_num = 0
+        self.features = None
+        self.feature_columns = []
+        self.feature_processor = FeatureProcessor()
         self.model = SigmoidModel(
             n_chains=self.model.n_chains,
             tune=self.model.tune,
@@ -114,6 +125,23 @@ class SigmoidActiveLearner:
         self.doses.append(dose)
         self.responses.append(response)
         self.round_num += 1
+    
+    def set_features(self, features: np.ndarray, feature_columns: List[str]) -> None:
+        """
+        设置特征数据并进行标准化处理。
+        
+        Args:
+            features: 特征数组，形状为 (n_samples, n_features)
+            feature_columns: 特征列名列表
+        """
+        # 验证特征数据
+        if not self.feature_processor.validate_features(features, feature_columns):
+            raise ValueError("特征数据验证失败")
+        
+        # 标准化特征数据
+        self.features = self.feature_processor.fit_transform(features)
+        self.feature_columns = feature_columns
+        logger.info(f"设置了 {self.features.shape[1]} 个特征，并进行了标准化处理")
         
     def get_starting_doses(self) -> List[float]:
         """
@@ -138,7 +166,8 @@ class SigmoidActiveLearner:
         Returns:
             (是否停止, 停止原因)
         """
-        # 条件2：最大测量次数
+        # ==================== 停止条件 2: 最大测量次数 ====================
+        # 当测量次数达到或超过最大测量次数时停止
         if len(self.doses) >= self.max_measurements:
             return True, f"达到最大测量次数 ({self.max_measurements})"
         
@@ -151,6 +180,7 @@ class SigmoidActiveLearner:
             self.model.fit(
                 np.array(self.doses),
                 np.array(self.responses),
+                self.features,
             )
         except Exception as e:
             logger.warning(f"模型拟合失败: {e}")
@@ -158,7 +188,7 @@ class SigmoidActiveLearner:
         
         # 找到最佳剂量
         x_grid = np.linspace(self.dose_range[0], self.dose_range[1], self.n_grid)
-        best_dose, _ = self.model.find_best_dose(x_grid)
+        best_dose, _ = self.model.find_best_dose(x_grid, self.features)
         
         # 【优化点】动态调整不确定性阈值，兼顾精度与测量次数
         # 轮次越多，阈值越严格，追求最小误差
@@ -169,16 +199,22 @@ class SigmoidActiveLearner:
         if current_round >= self.max_measurements - 2:
             adaptive_threshold = max(0.3, adaptive_threshold - 0.2)
         
-        # 条件1：不确定性达标
-        uncertainty = self.model.get_uncertainty_at_dose(best_dose)
+        # ==================== 停止条件 1: 不确定性达标 ====================
+        # 当最佳剂量处的后验标准差低于自适应不确定性阈值时停止
+        uncertainty = self.model.get_uncertainty_at_dose(best_dose, self.features)
         if uncertainty < adaptive_threshold:
             return True, f"最佳剂量处后验标准差={uncertainty:.2f} μm < {adaptive_threshold:.2f} μm"
         
-        # 条件3：低反应者
+        # ==================== 停止条件 3: 低反应者 ====================
+        # 当最高剂量达到或超过 6.0 D 且最大反应小于 10 μm 时停止（低反应者）
         max_dose = max(self.doses)
         max_response = max(self.responses)
         if max_dose >= 6.0 and max_response < 10:
             return True, f"最高剂量={max_dose:.1f}D 且最大反应={max_response:.1f}μm < 10μm（低反应者）"
+        
+        # ==================== 停止条件 4: 极高精度要求 ====================
+        # 误差率 < 1%（极高精度要求）
+        # 注：此条件暂未实现，可根据实际需求添加
         
         return False, ""
         
@@ -199,6 +235,7 @@ class SigmoidActiveLearner:
         self.model.fit(
             np.array(self.doses),
             np.array(self.responses),
+            self.features,
         )
         
         # 使用采集函数推荐
@@ -343,6 +380,7 @@ class SigmoidActiveLearner:
             self.model.fit(
                 np.array(self.doses),
                 np.array(self.responses),
+                self.features,
             )
         
         # 获取后验统计
@@ -352,7 +390,7 @@ class SigmoidActiveLearner:
         
         # 找到最佳剂量
         x_grid = np.linspace(self.dose_range[0], self.dose_range[1], self.n_grid)
-        best_dose, _ = self.model.find_best_dose(x_grid)
+        best_dose, _ = self.model.find_best_dose(x_grid, self.features)
         
         # 检查收敛性
         convergence = self.model.check_convergence()
@@ -372,6 +410,7 @@ class SigmoidActiveLearner:
         filepath: str,
         dose_col: str = "dose",
         response_col: str = "response",
+        feature_cols: Optional[List[str]] = None,
     ) -> None:
         """
         从 CSV 文件加载历史数据。
@@ -380,6 +419,7 @@ class SigmoidActiveLearner:
             filepath: CSV 文件路径
             dose_col: 剂量列名
             response_col: 反应列名
+            feature_cols: 特征列名列表，包含屈光不正、眼轴长、脉络膜厚度、血管指数
         """
         import pandas as pd
         
@@ -395,6 +435,25 @@ class SigmoidActiveLearner:
         for _, row in df.iterrows():
             self.doses.append(float(row[dose_col]))
             self.responses.append(float(row[response_col]))
+        
+        # 加载特征数据
+        if feature_cols:
+            # 检查所有特征列是否存在
+            for col in feature_cols:
+                if col not in df.columns:
+                    raise ValueError(f"CSV 中未找到特征列: {col}")
+            
+            # 提取特征数据
+            raw_features = df[feature_cols].values
+            
+            # 验证特征数据
+            if not self.feature_processor.validate_features(raw_features, feature_cols):
+                raise ValueError("特征数据验证失败")
+            
+            # 标准化特征数据
+            self.features = self.feature_processor.fit_transform(raw_features)
+            self.feature_columns = feature_cols
+            logger.info(f"从 CSV 加载了 {self.features.shape[1]} 个特征，并进行了标准化处理")
         
         self.round_num = len(self.doses)
         logger.info(f"从 CSV 加载了 {len(self.doses)} 条历史记录")

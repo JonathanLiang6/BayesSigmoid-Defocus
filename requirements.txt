@@ -1,8 +1,13 @@
-# 核心依赖 - 将安装最新稳定版本
+# 核心依赖 - 最新版本
 # 安装命令: pip install -r requirements.txt
 
 # 贝叶斯推断库
-pymc>=5.10
+pymc
+
+# JAX 支持（用于加速采样）
+jax
+jaxlib
+numpyro
 
 # 数值计算
 numpy
@@ -11,12 +16,20 @@ scipy
 # 数据处理和可视化
 pandas
 matplotlib
+pillow
 
 # 贝叶斯分析工具
-arviz
+arviz>=0.15.0
 
 # 进度显示
 tqdm
 
 # 类型支持
 typing-extensions
+
+# 配置文件解析
+pyyaml
+
+# 深度学习框架
+torch
+

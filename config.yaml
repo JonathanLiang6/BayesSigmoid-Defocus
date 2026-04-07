@@ -1,0 +1,85 @@
+# 配置文件 - 统一管理所有超参数
+
+# 模型配置
+model:
+  # MCMC 采样配置
+  mcmc:
+    n_chains: 4          # MCMC 链数
+    tune: 2000           # 调优步数
+    draws: 1000          # 后验样本数
+    target_accept: 0.95  # 目标接受率
+    max_treedepth: 10    # 最大树深度
+  
+  # 分层先验参数（基于群体统计）
+  priors:
+    baseline:
+      mu: 1.0
+      sigma: 0.5
+      lower: 0.0
+      upper: 5.0
+    max_response:
+      mu: 18.0
+      sigma: 2.0
+      lower: 10.0
+      upper: 25.0
+    slope:
+      mu: 2.0
+      sigma: 0.5
+      lower: 0.1
+      upper: 10.0
+    threshold:
+      mu: 2.5
+      sigma: 0.5
+      lower: 0.5
+      upper: 6.0
+    sigma:
+      sigma: 1.0
+    nu:
+      alpha: 3
+      beta: 1
+
+# 主动学习配置
+active_learning:
+  max_measurements: 5           # 最大测量次数
+  uncertainty_threshold: 2.0    # 不确定性阈值 (μm)
+  dose_range:
+    min: 0.5
+    max: 6.0
+  n_grid: 100                   # 搜索网格点数
+  
+  # 采集函数权重
+  acquisition_weights:
+    variance: 0.3               # 后验方差权重
+    ei: 0.3                     # 期望改进权重
+    eer: 0.4                    # 预期误差减少权重
+
+# 可视化配置
+visualization:
+  # 主题色彩
+  colors:
+    primary: "steelblue"
+    secondary: "purple"
+    accent: "red"
+    background: "white"
+    grid: "lightgray"
+  
+  # 图表大小
+  figsize:
+    default: [10, 6]
+    large: [14, 10]
+    small: [8, 5]
+  
+  # 语言设置
+  language: "zh"  # "zh" 或 "en"
+
+# 报告配置
+report:
+  output_dir: "results/reports"  # 报告输出目录
+  dpi: 150                      # 图像分辨率
+  format: "pdf"                  # 报告格式
+
+# 系统配置
+system:
+  random_seed: 42                # 随机种子
+  parallel_processes: 4          # 并行进程数
+  verbose: True                  # 详细输出
