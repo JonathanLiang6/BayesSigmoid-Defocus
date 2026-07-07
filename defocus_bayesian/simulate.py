@@ -204,6 +204,8 @@ class SimulationStudy:
         self,
         learner_factory,
         verbose: bool = True,
+        parallel: bool = True,
+        n_processes: int = None,
     ) -> Dict[str, float]:
         """
         运行模拟研究。
@@ -211,6 +213,8 @@ class SimulationStudy:
         Args:
             learner_factory: 创建学习器的工厂函数
             verbose: 是否打印进度
+            parallel: 是否使用并行处理
+            n_processes: 并行进程数，None表示使用所有CPU核心
             
         Returns:
             统计结果字典
@@ -223,38 +227,96 @@ class SimulationStudy:
             print(f"\n开始模拟 {self.n_subjects} 个受试者...")
             print("=" * 60)
         
-        for i in range(self.n_subjects):
-            # 创建新的模拟器和学习器
-            simulator = SubjectSimulator(random_seed=self.random_seed + i)
-            simulator.generate_subject()
+        if parallel:
+            # 【优化点】使用并行处理加速多受试者测试
+            import multiprocessing
+            from functools import partial
             
-            learner = learner_factory()
+            def run_single_subject(i, learner_factory, random_seed):
+                """运行单个受试者的模拟"""
+                simulator = SubjectSimulator(random_seed=random_seed + i)
+                simulator.generate_subject()
+                
+                learner = learner_factory()
+                
+                # 运行主动学习
+                result = learner.learn(
+                    simulator.get_response_function(),
+                    verbose=False,
+                )
+                
+                # 计算误差
+                threshold_error = abs(result.threshold_estimate - simulator.true_params.threshold)
+                
+                # 记录结果
+                return {
+                    "subject_id": i,
+                    "true_threshold": simulator.true_params.threshold,
+                    "estimated_threshold": result.threshold_estimate,
+                    "threshold_std": result.threshold_std,
+                    "threshold_error": threshold_error,
+                    "n_measurements": result.n_measurements,
+                    "best_dose": result.best_dose,
+                    "converged": result.converged,
+                    "measurements": result.measurements,
+                    "true_params": simulator.true_params,
+                }
             
-            # 运行主动学习
-            result = learner.learn(
-                simulator.get_response_function(),
-                verbose=False,
-            )
+            # 确定进程数
+            if n_processes is None:
+                n_processes = min(multiprocessing.cpu_count(), self.n_subjects)
             
-            # 计算误差
-            threshold_error = abs(result.threshold_estimate - simulator.true_params.threshold)
+            # 创建进程池
+            with multiprocessing.Pool(processes=n_processes) as pool:
+                # 准备任务
+                tasks = range(self.n_subjects)
+                # 运行并行任务
+                results = pool.map(
+                    partial(run_single_subject, learner_factory=learner_factory, random_seed=self.random_seed),
+                    tasks
+                )
+                # 收集结果
+                self.results.extend(results)
+                
+            # 排序结果
+            self.results.sort(key=lambda x: x["subject_id"])
             
-            # 记录结果
-            self.results.append({
-                "subject_id": i,
-                "true_threshold": simulator.true_params.threshold,
-                "estimated_threshold": result.threshold_estimate,
-                "threshold_std": result.threshold_std,
-                "threshold_error": threshold_error,
-                "n_measurements": result.n_measurements,
-                "best_dose": result.best_dose,
-                "converged": result.converged,
-                "measurements": result.measurements,
-                "true_params": simulator.true_params,
-            })
-            
-            if verbose and (i + 1) % 10 == 0:
-                print(f"已完成: {i + 1}/{self.n_subjects}")
+            if verbose:
+                print(f"已完成: {self.n_subjects}/{self.n_subjects}")
+        else:
+            # 串行处理
+            for i in range(self.n_subjects):
+                # 创建新的模拟器和学习器
+                simulator = SubjectSimulator(random_seed=self.random_seed + i)
+                simulator.generate_subject()
+                
+                learner = learner_factory()
+                
+                # 运行主动学习
+                result = learner.learn(
+                    simulator.get_response_function(),
+                    verbose=False,
+                )
+                
+                # 计算误差
+                threshold_error = abs(result.threshold_estimate - simulator.true_params.threshold)
+                
+                # 记录结果
+                self.results.append({
+                    "subject_id": i,
+                    "true_threshold": simulator.true_params.threshold,
+                    "estimated_threshold": result.threshold_estimate,
+                    "threshold_std": result.threshold_std,
+                    "threshold_error": threshold_error,
+                    "n_measurements": result.n_measurements,
+                    "best_dose": result.best_dose,
+                    "converged": result.converged,
+                    "measurements": result.measurements,
+                    "true_params": simulator.true_params,
+                })
+                
+                if verbose and (i + 1) % 10 == 0:
+                    print(f"已完成: {i + 1}/{self.n_subjects}")
         
         # 计算统计量
         stats = self._compute_statistics()
@@ -307,6 +369,7 @@ class SimulationStudy:
         self,
         strategies: Dict[str, Callable],
         verbose: bool = True,
+        parallel: bool = True,
     ) -> Dict[str, Dict[str, float]]:
         """
         比较不同策略。
@@ -314,6 +377,7 @@ class SimulationStudy:
         Args:
             strategies: 策略名称到工厂函数的映射
             verbose: 是否打印结果
+            parallel: 是否使用并行处理
             
         Returns:
             各策略的统计结果
@@ -326,7 +390,7 @@ class SimulationStudy:
                 print(f"策略: {name}")
                 print(f"{'='*60}")
             
-            stats = self.run(factory, verbose=verbose)
+            stats = self.run(factory, verbose=verbose, parallel=parallel)
             all_stats[name] = stats
         
         if verbose:

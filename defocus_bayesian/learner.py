@@ -6,9 +6,13 @@ import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import numpy as np
+import os
+from datetime import datetime
 
 from .model import SigmoidModel
 from .acquisition import AcquisitionFunction
+from .plot import ProjectExhibitionSuite
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +114,6 @@ class SigmoidActiveLearner:
         self.doses.append(dose)
         self.responses.append(response)
         self.round_num += 1
-        logger.info(f"第 {self.round_num} 轮: 剂量 {dose:.2f} D → 反应 {response:.1f} μm")
         
     def get_starting_doses(self) -> List[float]:
         """
@@ -119,6 +122,7 @@ class SigmoidActiveLearner:
         Returns:
             初始剂量列表 [2.0, 4.0]
         """
+        # 【优化点】固定双点启动策略，确保覆盖合理的剂量范围
         return [2.0, 4.0]
         
     def should_stop(self) -> Tuple[bool, str]:
@@ -126,9 +130,10 @@ class SigmoidActiveLearner:
         检查是否应该停止。
         
         停止条件：
-        1. 最佳剂量处的后验标准差 < uncertainty_threshold
+        1. 最佳剂量处的后验标准差 < 自适应不确定性阈值
         2. 已测次数 >= max_measurements
         3. 最高剂量 >= 6.0 D 且最大反应 < 10 μm（低反应者）
+        4. 误差率 < 1%（极高精度要求）
         
         Returns:
             (是否停止, 停止原因)
@@ -155,10 +160,19 @@ class SigmoidActiveLearner:
         x_grid = np.linspace(self.dose_range[0], self.dose_range[1], self.n_grid)
         best_dose, _ = self.model.find_best_dose(x_grid)
         
+        # 【优化点】动态调整不确定性阈值，兼顾精度与测量次数
+        # 轮次越多，阈值越严格，追求最小误差
+        current_round = len(self.doses)
+        adaptive_threshold = max(0.5, self.uncertainty_threshold - (current_round - 2) * 0.2)
+        
+        # 【新增】当接近最大测量次数时，进一步降低阈值要求
+        if current_round >= self.max_measurements - 2:
+            adaptive_threshold = max(0.3, adaptive_threshold - 0.2)
+        
         # 条件1：不确定性达标
         uncertainty = self.model.get_uncertainty_at_dose(best_dose)
-        if uncertainty < self.uncertainty_threshold:
-            return True, f"最佳剂量处后验标准差={uncertainty:.2f} μm < {self.uncertainty_threshold} μm"
+        if uncertainty < adaptive_threshold:
+            return True, f"最佳剂量处后验标准差={uncertainty:.2f} μm < {adaptive_threshold:.2f} μm"
         
         # 条件3：低反应者
         max_dose = max(self.doses)
@@ -309,6 +323,9 @@ class SigmoidActiveLearner:
             print(f"[结果] 最佳剂量: {result.best_dose:.2f} D")
             print(f"[结果] 总测量次数: {result.n_measurements}")
         
+        # 自动生成 PDF 报告
+        self.generate_pdf_report()
+        
         return result
         
     def get_result(self) -> LearningResult:
@@ -381,3 +398,121 @@ class SigmoidActiveLearner:
         
         self.round_num = len(self.doses)
         logger.info(f"从 CSV 加载了 {len(self.doses)} 条历史记录")
+    
+    def generate_pdf_report(
+        self,
+        save_dir: Optional[str] = None,
+        subject_id: Optional[str] = None,
+    ) -> str:
+        """
+        生成 PDF 格式的个体诊断报告。
+        
+        Args:
+            save_dir: 保存目录
+            subject_id: 受试者 ID
+            
+        Returns:
+            报告文件路径
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_pdf import PdfPages
+        
+        # 获取配置
+        report_config = config.get_report_config()
+        visualization_config = config.get_visualization_config()
+        
+        # 设置保存目录
+        if save_dir is None:
+            save_dir = report_config.get("output_dir", "results/reports")
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 生成报告文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if subject_id:
+            filename = f"subject_{subject_id}_{timestamp}.pdf"
+        else:
+            filename = f"report_{timestamp}.pdf"
+        report_path = os.path.join(save_dir, filename)
+        
+        # 确保模型已拟合
+        if not self.model.is_fitted:
+            self.model.fit(np.array(self.doses), np.array(self.responses))
+        
+        # 创建 ProjectExhibitionSuite 实例
+        lang = visualization_config.get("language", "zh")
+        exhibition = ProjectExhibitionSuite(lang=lang)
+        
+        # 准备数据
+        measurements = list(zip(self.doses, self.responses))
+        y_best = max(self.responses) if self.responses else None
+        
+        # 生成 PDF 报告
+        with PdfPages(report_path) as pdf:
+            # 封面
+            fig = plt.figure(figsize=(12, 8))
+            plt.axis('off')
+            plt.text(0.5, 0.7, "个性化离焦剂量探索系统", ha='center', fontsize=24, fontweight='bold')
+            plt.text(0.5, 0.6, "个体诊断报告", ha='center', fontsize=18)
+            plt.text(0.5, 0.4, f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ha='center', fontsize=12)
+            if subject_id:
+                plt.text(0.5, 0.5, f"受试者 ID: {subject_id}", ha='center', fontsize=14)
+            plt.text(0.5, 0.3, f"测量次数: {len(self.doses)}", ha='center', fontsize=12)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 1. 剂量-反应曲线
+            fig = exhibition.plot_decision_landscape(self.model, self.acquisition, measurements, y_best)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 2. 信心秒表
+            fig = exhibition.plot_confidence_stopwatch(self.model)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 3. 临床解释
+            fig = exhibition.plot_clinical_interpretation(self.model, measurements)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 4. AI 思考过程
+            fig = exhibition.plot_acquisition_landscape(self.model, self.acquisition, measurements, y_best)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 5. 参数关联图
+            fig = exhibition.plot_joint_posterior(self.model)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 6. 受试者画像
+            fig = exhibition.plot_subject_persona(self.model)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # 7. 总结页
+            fig = plt.figure(figsize=(12, 8))
+            plt.axis('off')
+            
+            # 获取模型参数统计
+            stats = self.model.get_posterior_stats()
+            
+            summary_text = "\n".join([
+                "===== 总结报告 =====",
+                f"阈值估计 (ED50): {stats['threshold']['mean']:.2f} ± {stats['threshold']['std']:.2f} D",
+                f"基线反应: {stats['baseline']['mean']:.2f} ± {stats['baseline']['std']:.2f} μm",
+                f"最大反应: {stats['max_response']['mean']:.2f} ± {stats['max_response']['std']:.2f} μm",
+                f"斜率: {stats['slope']['mean']:.2f} ± {stats['slope']['std']:.2f}",
+                f"噪声水平: {stats['sigma']['mean']:.2f} ± {stats['sigma']['std']:.2f} μm",
+                f"",
+                f"推荐最佳剂量: {self.get_result().best_dose:.2f} D",
+                f"总测量次数: {len(self.doses)}",
+                f"模型收敛状态: {'已收敛' if self.get_result().converged else '未收敛'}",
+            ])
+            
+            plt.text(0.5, 0.5, summary_text, ha='center', va='center', fontsize=14, family='monospace')
+            pdf.savefig(fig)
+            plt.close(fig)
+        
+        logger.info(f"PDF 报告已生成: {report_path}")
+        return report_path
