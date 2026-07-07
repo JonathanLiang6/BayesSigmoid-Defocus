@@ -53,6 +53,7 @@ class SigmoidModel:
         self,
         x_obs: np.ndarray,
         y_obs: np.ndarray,
+        features: Optional[np.ndarray] = None,
     ) -> pm.Model:
         """
         构建 PyMC 模型。
@@ -60,6 +61,7 @@ class SigmoidModel:
         Args:
             x_obs: 观测剂量数组 (D)
             y_obs: 观测反应数组 (μm)
+            features: 特征数组，包含屈光不正、眼轴长、脉络膜厚度、血管指数
             
         Returns:
             PyMC 模型实例
@@ -78,32 +80,55 @@ class SigmoidModel:
             mu_pop_threshold = 2.5
             sigma_pop_threshold = 1.0  # 增加方差，适应不同个体的阈值差异
             
+            # 特征处理
+            if features is not None and features.size > 0:
+                # 特征维度
+                n_features = features.shape[1]
+                
+                # 特征权重参数
+                w_baseline = pm.Normal("w_baseline", mu=0, sigma=0.5, shape=n_features)
+                w_max_response = pm.Normal("w_max_response", mu=0, sigma=0.5, shape=n_features)
+                w_slope = pm.Normal("w_slope", mu=0, sigma=0.5, shape=n_features)
+                w_threshold = pm.Normal("w_threshold", mu=0, sigma=0.5, shape=n_features)
+                
+                # 计算特征影响
+                features_effect_baseline = pm.math.dot(features, w_baseline)
+                features_effect_max_response = pm.math.dot(features, w_max_response)
+                features_effect_slope = pm.math.dot(features, w_slope)
+                features_effect_threshold = pm.math.dot(features, w_threshold)
+            else:
+                # 无特征时的默认值
+                features_effect_baseline = 0
+                features_effect_max_response = 0
+                features_effect_slope = 0
+                features_effect_threshold = 0
+            
             # 分层先验：个体参数从群体分布中采样
             # 使用截断正态分布确保参数在合理范围内
             baseline = pm.TruncatedNormal(
                 "baseline",
-                mu=mu_pop_baseline,
+                mu=mu_pop_baseline + features_effect_baseline,
                 sigma=sigma_pop_baseline,
                 lower=0.0,
                 upper=5.0,
             )
             max_response = pm.TruncatedNormal(
                 "max_response",
-                mu=mu_pop_max_response,
+                mu=mu_pop_max_response + features_effect_max_response,
                 sigma=sigma_pop_max_response,
                 lower=10.0,
                 upper=25.0,
             )
             slope = pm.TruncatedNormal(
                 "slope",
-                mu=np.exp(mu_pop_slope),
+                mu=np.exp(mu_pop_slope + features_effect_slope),
                 sigma=0.5,
                 lower=0.1,
                 upper=10.0,
             )
             threshold = pm.TruncatedNormal(
                 "threshold",
-                mu=mu_pop_threshold,
+                mu=mu_pop_threshold + features_effect_threshold,
                 sigma=sigma_pop_threshold,
                 lower=0.5,
                 upper=6.0,
@@ -142,6 +167,7 @@ class SigmoidModel:
         self,
         x_obs: np.ndarray,
         y_obs: np.ndarray,
+        features: Optional[np.ndarray] = None,
     ) -> az.InferenceData:
         """
         拟合模型并执行 MCMC 采样。
@@ -149,6 +175,7 @@ class SigmoidModel:
         Args:
             x_obs: 观测剂量数组 (D)
             y_obs: 观测反应数组 (μm)
+            features: 特征数组，包含屈光不正、眼轴长、脉络膜厚度、血管指数
             
         Returns:
             Arviz InferenceData 对象
@@ -156,26 +183,49 @@ class SigmoidModel:
         logger.info(f"开始 MCMC 采样: {len(x_obs)} 个观测点")
         
         # 构建模型
-        self.build_model(x_obs, y_obs)
+        self.build_model(x_obs, y_obs, features)
         
         # 执行采样，使用 JAX 后端加速
         with self.model:
             try:
                 # 使用 JAX NUTS 采样器，支持并行执行多条链
-                self.trace = jax.sample_numpyro_nuts(
+                # 注意：jax.sample_numpyro_nuts 不支持 return_inferencedata 参数
+                trace = jax.sample_numpyro_nuts(
                     draws=self.draws,
                     tune=self.tune,
                     chains=self.n_chains,
                     target_accept=0.95,
                     random_seed=self.random_seed,
                     progressbar=False,
-                    return_inferencedata=True,
                     nuts_kwargs={
                         'adapt_step_size': True,
                         'adapt_mass_matrix': True,
                         'max_tree_depth': 10,
                     },
                 )
+                # 转换为 InferenceData
+                try:
+                    self.trace = az.from_numpyro(trace)
+                except Exception as e:
+                    logger.error(f"转换为 InferenceData 失败: {e}")
+                    # 回退到标准采样器
+                    logger.info("回退到标准 NUTS 采样器")
+                    self.trace = pm.sample(
+                        draws=self.draws,
+                        tune=self.tune,
+                        chains=self.n_chains,
+                        target_accept=0.95,
+                        random_seed=self.random_seed,
+                        progressbar=False,
+                        return_inferencedata=True,
+                        nuts_kwargs={
+                            'adapt_step_size': True,
+                            'adapt_mass_matrix': True,
+                            'max_treedepth': 10,
+                            'adapt_delta': 0.95,
+                        },
+                        init='jitter+adapt_diag',
+                    )
             except Exception as e:
                 logger.error(f"MCMC 采样失败: {e}")
                 # 回退到标准采样器
@@ -214,6 +264,7 @@ class SigmoidModel:
     def predict(
         self,
         x_new: np.ndarray,
+        features: Optional[np.ndarray] = None,
         return_stats: bool = True,
     ) -> Dict[str, np.ndarray]:
         """
@@ -221,6 +272,7 @@ class SigmoidModel:
         
         Args:
             x_new: 新的剂量点数组 (D)
+            features: 特征数组，包含屈光不正、眼轴长、脉络膜厚度、血管指数
             return_stats: 是否返回统计量（均值、标准差等）
             
         Returns:
@@ -237,6 +289,34 @@ class SigmoidModel:
         max_response = posterior["max_response"].values.reshape(-1)
         slope = posterior["slope"].values.reshape(-1)
         threshold = posterior["threshold"].values.reshape(-1)
+        
+        # 处理特征权重
+        if features is not None and features.size > 0:
+            # 确保特征是二维数组
+            if features.ndim == 1:
+                features = features.reshape(1, -1)
+            
+            # 检查特征维度是否匹配
+            n_features = features.shape[1]
+            
+            # 获取权重参数
+            if "w_baseline" in posterior:
+                w_baseline = posterior["w_baseline"].values.reshape(-1, n_features)
+                w_max_response = posterior["w_max_response"].values.reshape(-1, n_features)
+                w_slope = posterior["w_slope"].values.reshape(-1, n_features)
+                w_threshold = posterior["w_threshold"].values.reshape(-1, n_features)
+                
+                # 计算特征影响
+                features_effect_baseline = np.dot(w_baseline, features.T).squeeze()
+                features_effect_max_response = np.dot(w_max_response, features.T).squeeze()
+                features_effect_slope = np.dot(w_slope, features.T).squeeze()
+                features_effect_threshold = np.dot(w_threshold, features.T).squeeze()
+                
+                # 调整参数
+                baseline = baseline + features_effect_baseline
+                max_response = max_response + features_effect_max_response
+                slope = slope * np.exp(features_effect_slope)  # 考虑指数影响
+                threshold = threshold + features_effect_threshold
         
         # 重新计算样本数
         n_samples = len(baseline)
@@ -342,31 +422,33 @@ class SigmoidModel:
         
         return results
     
-    def find_best_dose(self, x_grid: np.ndarray) -> Tuple[float, float]:
+    def find_best_dose(self, x_grid: np.ndarray, features: Optional[np.ndarray] = None) -> Tuple[float, float]:
         """
         在网格上找到最佳剂量（预测反应最大的点）。
         
         Args:
             x_grid: 剂量搜索网格
+            features: 特征数组，包含屈光不正、眼轴长、脉络膜厚度、血管指数
             
         Returns:
             (最佳剂量, 预测反应均值)
         """
-        pred = self.predict(x_grid)
+        pred = self.predict(x_grid, features)
         best_idx = np.argmax(pred["mean"])
         return float(x_grid[best_idx]), float(pred["mean"][best_idx])
     
-    def get_uncertainty_at_dose(self, dose: float) -> float:
+    def get_uncertainty_at_dose(self, dose: float, features: Optional[np.ndarray] = None) -> float:
         """
         获取指定剂量处的预测不确定性（标准差）。
         
         Args:
             dose: 剂量值 (D)
+            features: 特征数组，包含屈光不正、眼轴长、脉络膜厚度、血管指数
             
         Returns:
             预测标准差
         """
-        pred = self.predict(np.array([dose]))
+        pred = self.predict(np.array([dose]), features)
         return float(pred["std"][0])
     
     def save_posterior(self, filepath: str) -> None:
