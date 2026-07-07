@@ -1,0 +1,11 @@
+pymc>=5.28
+arviz>=0.23
+pandas>=3.0
+numpy>=2.4
+matplotlib>=3.10
+seaborn>=0.13
+scikit-learn>=1.8
+tqdm>=4.67
+pyyaml>=6.0
+jax>=0.9
+jaxlib>=0.9
